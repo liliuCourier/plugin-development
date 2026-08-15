@@ -457,6 +457,8 @@ DSH profile 插件的正式安装入口是 `dsh plugin --profile <name> <args...
 | 命令超时（如 sharp 首次构建拉二进制） | pnpm 静默挂起 | 用 `run_in_background` 跑，完成后用 `job_output` 收结果；装完的包在 profile 自己的 `node_modules`（`~/.dsh/profiles/<name>/node_modules`），不是共享的 `~/.dsh/profiles/node_modules`（后者是 `healProfilesModuleFallback` 给 DSH 核心包建的符号链接层） |
 | 装进依赖了但 profile 不加载 | 无 `dsh.bundle.patch` 的插件（如 `dsh-vision-router`）不会进 `dsh.profile.bundles`，`reconcilePlugins` 只收 bundle | 在 `~/.dsh/profiles/<name>/cordis.patch.yml` 的 `insert` 列表加 `- id: <name>` / `name: <name>`（格式同 `dsh-chat-outline` 示例），再用 `dsh --profile <name> --dump-config` 验证合成树 |
 | 验证插件解析 | — | 用 `createRequire('<profile>/package.json').resolve('<pkg>')` 从 profile 锚点解析，确认 Node 能找到 index.js 及全部依赖 |
+| `notes/list: transport failure for /api/notes/list: HTTP 404`（host Remote 服务在浏览器调用 404） | 插件的 `@deepseek-ai/*` 依赖从**仓库自己的 node_modules**（npm install 时被 npm 实体化出的拷贝）解析，与 dsh web 进程里 gateway 用的**官方 runtime 包**是两份不同实例；`@Remote` 装饰器把方法标记写进**模块私有 WeakMap**，gateway 的 SRC `collectSrcClaims` 用官方 `remoteMethods()` 读官方 WeakMap → 读不到插件拷贝写的标记 → `claimsEndpoint` 返回 false → 客户端 RPC 退回 HTTP 传输 → 404 | 让插件与 gateway **共享同一份** `@deepseek-ai/*`：删掉仓库真实 `node_modules`，重建为指向 `~/.dsh/profiles/node_modules` 的 **junction**（`New-Item -ItemType Junction`），再重启 dsh web 使 host 插件用官方包重新加载。离线验证脚本在仓库目录能过是因为它只解析仓库侧那一份，自洽不代表运行时两方同源 |
+| host Remote 修复后仍 404 | 运行中的 dsh web 进程已缓存旧模块（link 指向的仓库代码 + 旧 node_modules 解析），文件系统修复不会让已加载模块换源 | 重启 dsh web（会断开当前会话），或在仓库目录跑 `verify-host.mjs` 确认 junction 下解析路径已指向官方 runtime 包后再重启 |
 
 安装完成 ≠ 生效：profile 配置是启动时读取的，正在运行的 `dsh web` 需要重启才加载新插件；重启会断开当前会话。
 
